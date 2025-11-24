@@ -1,4 +1,4 @@
-# json_anything
+# @tehshrike/json_anything
 
 use JSON to transfer values that JSON.stringify won't normally encode.
 
