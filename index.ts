@@ -9,11 +9,13 @@ type SerializerDeserializer<T, INBETWEEN extends JsonableValue> = {
 	deserialize: (value: INBETWEEN) => T
 }
 
-type TypesMap<T extends Record<string, any>, INBETWEEN extends { [key in keyof T]: any }> = {
-	[type in keyof T]: SerializerDeserializer<T[type], INBETWEEN[type]>
-}
+type SerializerFn = <T, INBETWEEN extends JsonableValue>(
+	def: SerializerDeserializer<T, INBETWEEN>
+) => SerializerDeserializer<T, INBETWEEN>
 
-function assert(condition: any, message: string): asserts condition {
+const serializerFn: SerializerFn = def => def
+
+function assert(condition: unknown, message: string): asserts condition {
 	if (!condition) {
 		throw new Error(message)
 	}
@@ -21,7 +23,7 @@ function assert(condition: any, message: string): asserts condition {
 
 // https://github.com/sindresorhus/is-plain-obj/blob/6a4cfe72714db0b90fcf6e1f78a9b118b98d44fa/index.js
 const is_plain_object = (value: unknown): value is {
-	[key: string]: any
+	[key: string]: unknown
 } => {
 	if (Object.prototype.toString.call(value) !== `[object Object]`) {
 		return false
@@ -31,12 +33,12 @@ const is_plain_object = (value: unknown): value is {
 	return prototype === null || prototype === Object.prototype
 }
 
-const make_recursive_transform = <T extends TypesMap<any, any>>({
+const make_recursive_transform = ({
 	unique_key,
 	types,
 }: {
 	unique_key: string
-	types: T
+	types: Record<string, SerializerDeserializer<unknown, JsonableValue>>
 }) => {
 	const types_array = Object.entries(types).map(([ type, functions ]) => ({ type, ...functions }))
 
@@ -67,23 +69,24 @@ const make_recursive_transform = <T extends TypesMap<any, any>>({
 	return recursive_transform
 }
 
-export default <T extends TypesMap<any, any>>({
+export default <T extends Record<string, SerializerDeserializer<any, any>>>({
 	unique_key,
 	types
 }: {
 	unique_key: string
-	types: T
+	types: ((serializer: SerializerFn) => T) | T
 }) => {
-	const recursive_transform = make_recursive_transform({ unique_key, types })
+	const resolvedTypes = typeof types === 'function' ? types(serializerFn) : types
+	const recursive_transform = make_recursive_transform({ unique_key, types: resolvedTypes })
 
 	return {
 		serialize: (input: unknown) => JSON.stringify(recursive_transform(input)),
 		deserialize: (input: string) => JSON.parse(input, (key, value: unknown) => {
 			if (is_plain_object(value) && unique_key in value) {
 				const type = value[unique_key] as keyof T
-				const type_handler = types[type]
+				const type_handler = resolvedTypes[type]
 				assert(type_handler, `Type handler must exist for type: ${String(type)}`)
-				return type_handler.deserialize(value.value)
+				return type_handler.deserialize(value.value as JsonableValue)
 			}
 
 			return value
